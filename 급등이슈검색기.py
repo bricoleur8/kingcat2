@@ -80,25 +80,25 @@ def fetch_recent_news(keyword):
 
 # Streamlit UI
 st.set_page_config(page_title="급등주 이슈 검색기", layout="wide")
-st.title("\ud83d\udcc8 급등주 이슈 검색기")
+st.title("급등주 이슈 검색기")
 
 df = load_and_parse_excel(EXCEL_URL)
 
-keyword = st.text_input("\ud83d\udd0d 종목명 또는 종목코드 입력", "")
+keyword = st.text_input("종목명 또는 종목코드 입력", "")
 
 if keyword:
     filtered = df[df["종목명"].str.contains(keyword) | df["종목코드"].astype(str).str.contains(keyword)]
-    st.write(f"### \ud83d\udd0e 검색 결과: `{keyword}`")
+    st.write(f"### 검색 결과: `{keyword}`")
     st.dataframe(filtered, use_container_width=True)
 
-    st.write("### \ud83e\udde0 연관 키워드 분석")
+    st.write("### 연관 키워드 분석")
     common_keywords = filtered['급등이슈'].str.extractall(r'(반도체|로봇|공급계약|상장|실적|메모리|투자|AI|전기차|수출|FDA|임상)')[0].value_counts()
     if not common_keywords.empty:
         st.bar_chart(common_keywords)
     else:
         st.info("분석 가능한 키워드가 없습니다.")
 
-    st.write("### \ud83d\udcf0 최근 1주일 뉴스 요약")
+    st.write("### 최근 1주일 뉴스 요약")
     news_results = fetch_recent_news(keyword)
     if news_results:
         for news in news_results:
@@ -110,6 +110,6 @@ if keyword:
         st.info("최근 뉴스가 없습니다.")
 
     csv = filtered.to_csv(index=False).encode('utf-8-sig')
-    st.download_button("⬇️ 검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
+    st.download_button("검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
 else:
     st.info("왼쪽 상단에서 검색어를 입력하세요.")
