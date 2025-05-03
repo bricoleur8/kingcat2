@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import re
 import requests
@@ -93,7 +93,7 @@ if uploaded_file:
             st.info("분석 가능한 키워드가 없습니다.")
 
         # 같은 테마 종목 추출
-        st.write("### 🧲 같은 테마/이슈로 급등한 종목 비교")
+        st.write("### 🧩 같은 테마/이슈로 급등한 종목 비교")
         if not common_keywords.empty:
             top_keyword = common_keywords.idxmax()
             theme_related = df[df['급등이슈'].str.contains(top_keyword, na=False)]
