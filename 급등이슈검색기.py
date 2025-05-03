@@ -5,9 +5,13 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
-# 엑셀 데이터 로드 및 전처리 함수
-def load_and_parse_excel(file):
-    df_raw = pd.read_excel(file, sheet_name=0)
+# GitHub에 업로드된 엑셀파일 URL (Raw 링크 사용)
+EXCEL_URL = "https://raw.githubusercontent.com/bricoleur8/kingcat/main/통합메모관리자.xlsx"
+
+# 엑셀 데이터 로드 함수
+@st.cache_data
+def load_and_parse_excel(url):
+    df_raw = pd.read_excel(url, engine="openpyxl")
     df_raw.columns = ["종목코드", "종목명", "급등이력", "기타"]
     df_raw[["종목코드", "종목명"]] = df_raw[["종목코드", "종목명"]].ffill()
 
@@ -34,7 +38,7 @@ def load_and_parse_excel(file):
                 i += 1
     return pd.DataFrame(parsed_rows)
 
-# 최근 1주일 뉴스 가져오기
+# 최근 뉴스 가져오기
 def fetch_recent_news(keyword):
     base_url = "https://search.naver.com/search.naver"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -67,44 +71,41 @@ def fetch_recent_news(keyword):
             })
     return results
 
-# Streamlit UI
-st.set_page_config(page_title="급등이슈 검색기", layout="wide")
+# ✅ Streamlit UI
+st.set_page_config(page_title="급등주 이슈 검색기", layout="wide")
 st.title("📈 급등주 이슈 검색기")
 
-uploaded_file = st.file_uploader("📂 급등주 데이터 엑셀 파일 업로드", type=["xlsx"])
+df = load_and_parse_excel(EXCEL_URL)
 
-if uploaded_file:
-    df = load_and_parse_excel(uploaded_file)
-    keyword = st.text_input("🔍 종목명 또는 종목코드 입력", "")
+keyword = st.text_input("🔍 종목명 또는 종목코드 입력", "")
 
-    if keyword:
-        filtered = df[df["종목명"].str.contains(keyword) | df["종목코드"].astype(str).str.contains(keyword)]
-        st.write(f"### 🔎 검색 결과: `{keyword}`")
-        st.dataframe(filtered, use_container_width=True)
+if keyword:
+    filtered = df[df["종목명"].str.contains(keyword) | df["종목코드"].astype(str).str.contains(keyword)]
+    st.write(f"### 🔎 검색 결과: `{keyword}`")
+    st.dataframe(filtered, use_container_width=True)
 
-        # 연관 키워드 분석
-        st.write("### 🧠 연관 키워드 분석")
-        common_keywords = filtered['급등이슈'].str.extractall(r'(반도체|로봇|공급계약|상장|실적|메모리|투자|AI|전기차|수출|FDA|임상)')[0].value_counts()
-        if not common_keywords.empty:
-            st.bar_chart(common_keywords)
-        else:
-            st.info("분석 가능한 키워드가 없습니다.")
+    # 연관 키워드 분석
+    st.write("### 🧠 연관 키워드 분석")
+    common_keywords = filtered['급등이슈'].str.extractall(r'(반도체|로봇|공급계약|상장|실적|메모리|투자|AI|전기차|수출|FDA|임상)')[0].value_counts()
+    if not common_keywords.empty:
+        st.bar_chart(common_keywords)
+    else:
+        st.info("분석 가능한 키워드가 없습니다.")
 
-        # 뉴스 요약
-        st.write("### 📰 최근 1주일 뉴스 요약")
-        news_results = fetch_recent_news(keyword)
-        if news_results:
-            for news in news_results:
-                st.markdown(f"**[{news['제목']}]({news['링크']})**")
-                st.write(f"출처: {news['출처']}")
-                st.write(news['요약'])
-                st.markdown("---")
-        else:
-            st.info("최근 뉴스가 없습니다.")
+    # 뉴스 요약
+    st.write("### 📰 최근 1주일 뉴스 요약")
+    news_results = fetch_recent_news(keyword)
+    if news_results:
+        for news in news_results:
+            st.markdown(f"**[{news['제목']}]({news['링크']})**")
+            st.write(f"출처: {news['출처']}")
+            st.write(news['요약'])
+            st.markdown("---")
+    else:
+        st.info("최근 뉴스가 없습니다.")
 
-        # 다운로드
-        csv = filtered.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("⬇️ 검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
-
+    # 다운로드
+    csv = filtered.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("⬇️ 검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
 else:
-    st.info("⬆️ 왼쪽 상단에서 `.xlsx` 파일을 업로드하면 급등 이슈 검색 기능을 사용할 수 있습니다.")
+    st.info("왼쪽 상단에서 검색어를 입력하세요.")
