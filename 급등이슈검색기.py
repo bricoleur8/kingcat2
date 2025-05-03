@@ -1,4 +1,4 @@
-
+﻿
 import streamlit as st
 import pandas as pd
 import re
@@ -9,14 +9,6 @@ from datetime import datetime, timedelta
 # 엑셀 데이터 로드 및 전처리 함수
 def load_and_parse_excel(file):
     df_raw = pd.read_excel(file, sheet_name=0)
-
-    # 컬럼 자동 확인
-    required_cols = ["종목코드", "종목명", "급등이력"]
-    for col in required_cols:
-        if col not in df_raw.columns:
-            st.error(f"❌ 엑셀에 '{col}' 컬럼이 없습니다. 파일을 확인해주세요.")
-            return pd.DataFrame()
-
     df_raw[["종목코드", "종목명"]] = df_raw[["종목코드", "종목명"]].ffill()
 
     parsed_rows = []
@@ -83,47 +75,44 @@ uploaded_file = st.file_uploader("📂 급등주 데이터 엑셀 파일 업로�
 
 if uploaded_file:
     df = load_and_parse_excel(uploaded_file)
+    keyword = st.text_input("🔍 종목명 또는 종목코드 입력", "")
 
-    if not df.empty:
-        keyword = st.text_input("🔍 종목명 또는 종목코드 입력", "")
+    if keyword:
+        filtered = df[df["종목명"].str.contains(keyword) | df["종목코드"].astype(str).str.contains(keyword)]
+        st.write(f"### 🔎 검색 결과: `{keyword}`")
+        st.dataframe(filtered, use_container_width=True)
 
-        if keyword:
-            filtered = df[df["종목명"].str.contains(keyword) | df["종목코드"].astype(str).str.contains(keyword)]
-            st.write(f"### 🔎 검색 결과: `{keyword}`")
-            st.dataframe(filtered, use_container_width=True)
+        # 연관 키워드 분석
+        st.write("### 🧠 연관 키워드 분석")
+        common_keywords = filtered['급등이슈'].str.extractall(r'(반도체|로봇|공급계약|상장|실적|메모리|투자|AI|전기차|수출|FDA|임상)')[0].value_counts()
+        if not common_keywords.empty:
+            st.bar_chart(common_keywords)
+        else:
+            st.info("분석 가능한 키워드가 없습니다.")
 
-            # 연관 키워드 분석
-            st.write("### 🧠 연관 키워드 분석")
-            common_keywords = filtered['급등이슈'].str.extractall(r'(반도체|로봇|공급계약|상장|실적|메모리|투자|AI|전기차|수출|FDA|임상)')[0].value_counts()
-            if not common_keywords.empty:
-                st.bar_chart(common_keywords)
-            else:
-                st.info("분석 가능한 키워드가 없습니다.")
+        # 같은 테마 종목 추출
+        st.write("### 🧩 같은 테마/이슈로 급등한 종목 비교")
+        if not common_keywords.empty:
+            top_keyword = common_keywords.idxmax()
+            theme_related = df[df['급등이슈'].str.contains(top_keyword)]
+            st.dataframe(theme_related, use_container_width=True)
+        else:
+            st.info("테마 추출을 위한 키워드가 부족합니다.")
 
-            # 동일 이슈 포함한 종목 비교
-            st.write("### 🔗 동일 급등 이슈 포함 종목")
-            issue_keywords = "|".join(common_keywords.index.tolist())
-            related_df = df[df["급등이슈"].str.contains(issue_keywords, na=False)] if issue_keywords else pd.DataFrame()
-            if not related_df.empty:
-                st.dataframe(related_df, use_container_width=True)
-            else:
-                st.info("해당 키워드로 연결된 종목이 없습니다.")
+        # 뉴스 요약
+        st.write("### 📰 최근 1주일 뉴스 요약")
+        news_results = fetch_recent_news(keyword)
+        if news_results:
+            for news in news_results:
+                st.markdown(f"**[{news['제목']}]({news['링크']})**")
+                st.write(f"출처: {news['출처']}")
+                st.write(news['요약'])
+                st.markdown("---")
+        else:
+            st.info("최근 뉴스가 없습니다.")
 
-            # 뉴스 요약
-            st.write("### 📰 최근 1주일 뉴스 요약")
-            news_results = fetch_recent_news(keyword)
-            if news_results:
-                for news in news_results:
-                    st.markdown(f"**[{news['제목']}]({news['링크']})**")
-                    st.write(f"출처: {news['출처']}")
-                    st.write(news['요약'])
-                    st.markdown("---")
-            else:
-                st.info("최근 뉴스가 없습니다.")
-
-            # 다운로드
-            csv = filtered.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("⬇️ 검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
-
+        # 다운로드
+        csv = filtered.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("⬇️ 검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
 else:
     st.info("⬆️ 왼쪽 상단에서 `.xlsx` 파일을 업로드하면 급등 이슈 검색 기능을 사용할 수 있습니다.")
