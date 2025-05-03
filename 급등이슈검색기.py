@@ -1,20 +1,26 @@
-﻿import streamlit as st
+﻿
+import streamlit as st
 import pandas as pd
 import re
+from collections import Counter
+from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
 
-# 엑셀 데이터 로드 및 전처리 함수
+# 엑셀 데이터 로드 및 전처리
 def load_and_parse_excel(file):
     df_raw = pd.read_excel(file, sheet_name=0)
-    df_raw[["종목코드", "종목명"]] = df_raw[["종목코드", "종목명"]].ffill()
+    df_raw.columns = df_raw.columns.str.strip()
+    if not {'종목코드', '종목명', '급등이력'}.issubset(df_raw.columns):
+        st.error("엑셀에 '종목코드', '종목명', '급등이력' 컬럼이 없습니다. 파일을 확인해주세요.")
+        return pd.DataFrame()
+    df_raw[['종목코드', '종목명']] = df_raw[['종목코드', '종목명']].ffill()
 
     parsed_rows = []
     for _, row in df_raw.iterrows():
         code = row["종목코드"]
         name = row["종목명"]
-        raw_text = str(row.get("급등이력", ""))
+        raw_text = str(row["급등이력"])
         events = re.split(r'[\r\n\u2028\u000B]+', raw_text)
         i = 0
         while i < len(events) - 1:
@@ -33,41 +39,45 @@ def load_and_parse_excel(file):
                 i += 1
     return pd.DataFrame(parsed_rows)
 
-# 최근 1주일 뉴스 가져오기
+# 키워드 추출: 단순 빈도 기반
+def extract_keywords(df):
+    all_text = " ".join(df["급등이슈"].dropna().astype(str).tolist())
+    words = re.findall(r"[가-힣A-Za-z]+", all_text)
+    counter = Counter(words)
+    stopwords = set(["공급", "계약", "실적", "기대감", "전망", "증가", "수주", "상승", "급등", "발표", "진입", "결정", "확정", "계약", "기대", "소식", "투자"])
+    keywords = {word: freq for word, freq in counter.items() if len(word) > 1 and word not in stopwords}
+    return dict(Counter(keywords).most_common(10))
+
+# 뉴스 수집
 def fetch_recent_news(keyword):
-    try:
-        base_url = "https://search.naver.com/search.naver"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        today = datetime.today()
-        one_week_ago = today - timedelta(days=7)
-        params = {
-            "where": "news",
-            "query": keyword,
-            "sort": "1",
-            "pd": "3",
-            "ds": one_week_ago.strftime('%Y.%m.%d'),
-            "de": today.strftime('%Y.%m.%d'),
-        }
-
-        response = requests.get(base_url, headers=headers, params=params, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        news_items = soup.select("ul.list_news div.news_wrap.api_ani_send")
-        results = []
-
-        for item in news_items[:5]:
-            title_tag = item.select_one("a.news_tit")
-            summary_tag = item.select_one("div.dsc_wrap")
-            source_tag = item.select_one("a.info_group")
-            if title_tag and summary_tag:
-                results.append({
-                    "제목": title_tag.text.strip(),
-                    "링크": title_tag["href"],
-                    "요약": summary_tag.text.strip(),
-                    "출처": source_tag.text.strip() if source_tag else "-"
-                })
-        return results
-    except:
-        return []
+    base_url = "https://search.naver.com/search.naver"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    today = datetime.today()
+    week_ago = today - timedelta(days=7)
+    params = {
+        "where": "news",
+        "query": keyword,
+        "sort": "1",
+        "pd": "3",
+        "ds": week_ago.strftime('%Y.%m.%d'),
+        "de": today.strftime('%Y.%m.%d')
+    }
+    response = requests.get(base_url, headers=headers, params=params)
+    soup = BeautifulSoup(response.text, "html.parser")
+    news_items = soup.select("ul.list_news div.news_wrap.api_ani_send")
+    results = []
+    for item in news_items[:5]:
+        title_tag = item.select_one("a.news_tit")
+        summary_tag = item.select_one("div.dsc_wrap")
+        source_tag = item.select_one("a.info_group")
+        if title_tag and summary_tag:
+            results.append({
+                "제목": title_tag.text.strip(),
+                "링크": title_tag["href"],
+                "요약": summary_tag.text.strip(),
+                "출처": source_tag.text.strip() if source_tag else "-"
+            })
+    return results
 
 # Streamlit UI
 st.set_page_config(page_title="급등이슈 검색기", layout="wide")
@@ -77,45 +87,37 @@ uploaded_file = st.file_uploader("📂 급등주 데이터 엑셀 파일 업로�
 
 if uploaded_file:
     df = load_and_parse_excel(uploaded_file)
-    keyword = st.text_input("🔍 종목명 또는 종목코드 입력", "")
+    if not df.empty:
+        keyword = st.text_input("🔍 종목명 또는 종목코드 입력", "")
 
-    if keyword:
-        filtered = df[df["종목명"].str.contains(keyword) | df["종목코드"].astype(str).str.contains(keyword)]
-        st.write(f"### 🔎 검색 결과: `{keyword}`")
-        st.dataframe(filtered, use_container_width=True)
+        if keyword:
+            filtered = df[df["종목명"].str.contains(keyword) | df["종목코드"].astype(str).str.contains(keyword)]
+            st.markdown(f"### 🔎 검색 결과: <span style='color:green'>{keyword}</span>", unsafe_allow_html=True)
+            st.dataframe(filtered, use_container_width=True)
 
-        # 연관 키워드 분석
-        st.write("### 🧠 연관 키워드 분석")
-        common_keywords = filtered['급등이슈'].str.extractall(r'(반도체|로봇|공급계약|상장|실적|메모리|투자|AI|전기차|수출|FDA|임상)')[0].value_counts()
-        if not common_keywords.empty:
-            st.bar_chart(common_keywords)
-        else:
-            st.info("분석 가능한 키워드가 없습니다.")
+            st.markdown("### 🧠 연관 키워드 분석")
+            keywords = extract_keywords(filtered)
+            if keywords:
+                st.bar_chart(pd.Series(keywords))
+            else:
+                st.info("추출된 주요 키워드가 없습니다.")
 
-        # 같은 테마 종목 추출
-        st.write("### 🧩 같은 테마/이슈로 급등한 종목 비교")
-        if not common_keywords.empty:
-            top_keyword = common_keywords.idxmax()
-            theme_related = df[df['급등이슈'].str.contains(top_keyword, na=False)]
-            theme_related = theme_related[~theme_related["종목명"].isin(filtered["종목명"])]  # 중복 제외
-            st.dataframe(theme_related, use_container_width=True)
-        else:
-            st.info("테마 추출을 위한 키워드가 부족합니다.")
+            st.markdown("### 📋 같은 테마/이슈로 급등한 종목 비교")
+            common_issues = df[df["급등이슈"].isin(filtered["급등이슈"])]
+            st.dataframe(common_issues, use_container_width=True)
 
-        # 뉴스 요약
-        st.write("### 📰 최근 1주일 뉴스 요약")
-        news_results = fetch_recent_news(keyword)
-        if news_results:
-            for news in news_results:
-                st.markdown(f"**[{news['제목']}]({news['링크']})**")
-                st.write(f"출처: {news['출처']}")
-                st.write(news['요약'])
-                st.markdown("---")
-        else:
-            st.info("최근 뉴스가 없습니다.")
+            st.markdown("### 📰 최근 1주일 뉴스 요약")
+            news = fetch_recent_news(keyword)
+            if news:
+                for item in news:
+                    st.markdown(f"**[{item['제목']}]({item['링크']})**")
+                    st.write(f"출처: {item['출처']}")
+                    st.write(item["요약"])
+                    st.markdown("---")
+            else:
+                st.info("최근 뉴스가 없습니다.")
 
-        # 다운로드
-        csv = filtered.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("⬇️ 검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
+            csv = filtered.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 검색 결과 다운로드 (CSV)", csv, file_name="급등이슈_검색결과.csv", mime="text/csv")
 else:
     st.info("⬆️ 왼쪽 상단에서 `.xlsx` 파일을 업로드하면 급등 이슈 검색 기능을 사용할 수 있습니다.")
